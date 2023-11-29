@@ -1,0 +1,850 @@
+---
+title: "DSA2101 Project"
+author: "Russell Ng"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message=FALSE,
+                      warning=FALSE,
+                      include=TRUE,
+                      fig.align="center",
+                      out.width="100%")
+```
+
+### Introduction
+This project aims to conduct data analysis and visualization on the FIFA World Cup (WC) dataset, by predicting outcomes of FIFA WC matches. 
+
+This project will go through;
+
+* Introduction (you are here!)
+* Exploratory analysis, summary statistics, data cleaning (includes figures NOT meant for grading)
+* Question to be answered and methodology
+* Analyses
+* Discussion
+* Conclusion
+* References
+
+Please take note that due to the use of interactive graphs, this file may take a significant time to knit AND display. Don't be alarmed!
+
+This dataset contains data regarding the WC from 1930 to 2018 (note it does not include the most recent edition of the 2022 WC).
+
+## We will load the FIFA WC data using the ```readr``` library. 
+Please ensure the following packages are installed: ```dplyr```, ```tidyr```, ```ggplot2```, ```stringr```, ```plotly```, ```maps```, ```lubridate```
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(plotly)
+library(maps)
+library(lubridate)
+#library(gganimate)
+#library(gifski)
+wcmatches <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-29/wcmatches.csv')
+worldcups <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-29/worldcups.csv')
+# should include load from /src if exists, else readr
+```
+
+## Let's take a look at the overview of the two datasets we have.
+
+Firstly, the ```worldcups``` dataset.
+This dataset contains top-level, more generalized data for each WC, such as year it was held, country it was held in, top 4 places, attendance, and goals scored over the entire tournament.
+```{r echo=FALSE}
+#str(worldcups)
+#summary(worldcups)
+```
+
+Secondly, the ```wcmatches``` dataset.
+This dataset contains more atomic data about each WC match specifically, such as date of the match, day of the match, home and away teams, final scoreline, and additional remarks such as if games went to extra time or penalties.
+```{r echo=FALSE}
+#str(wcmatches)
+#summary(wcmatches)
+```
+
+## Exploratory Analysis and Summary
+### Here we report some summary statistics/figures along with low-level graphs (NOT for grading purposes) to give a better overview of the data. We also elaborate on our data cleaning process.
+
+List of countries that have hosted:
+```{r}
+unique(worldcups$host)
+```
+
+List of participating countries:
+```{r}
+unique(c(unique(wcmatches$home_team), unique(wcmatches$away_team)))
+```
+Clearly, some of these countries no longer exist! We attempt to replace them with their closest modern-day nation if possible, such as the "merger" of ```East Germany``` and ```West Germany``` into ```Germany```, and the replacement of ```Dutch West Indies``` (by right ```Dutch East Indies```) with ```Indonesia```. Otherwise, we attempt to replace with the country that succeeded it based on UN seats. This would give us ```Soviet Union``` to ```Russia```, and ```Czechoslovakia``` to ```Czech Republic```. Where no UN seat succession existed, we replace based on majority demographic. This will give us ```Yugoslavia``` to ```Croatia``` and ```FR Yugoslavia``` to ```Serbia```.
+```{r echo=FALSE}
+countrymapping <- data.frame(
+  original = c("West Germany","East Germany","Soviet Union","Czechoslovakia","Yugoslavia",
+               "FR Yugoslavia","Dutch West Indies"),
+  replacement = c("Germany","Germany","Russia","Czech Republic",
+                  "Croatia","Serbia","Indonesia"))
+worlcups_original <- worldcups
+wcmatches_original <- wcmatches
+# worldcups <- worldcups %>%
+#   mutate_all(~ ifelse(. %in% c("West Germany","East Germany"),"Germany",.)) %>%
+#   filter_all(all_vars(!(. %in% c("Soviet Union","Czechoslovakia","Yugoslavia","FR Yugoslavia"))))
+# wcmatches <- wcmatches %>%
+#   mutate_all(~ ifelse(. %in% c("West Germany","East Germany"),"Germany",.)) %>%
+#   filter_all(all_vars(!(. %in% c("Soviet Union","Czechoslovakia","Yugoslavia","FR Yugoslavia"))))
+# function to replace values according to a mapping
+replace_values <- function(x) {
+  if(is.character(x)) {
+    recode(x, !!!setNames(countrymapping$replacement, countrymapping$original))
+  } else {
+    x
+  }
+}
+worldcups <- worldcups %>%
+  mutate_all(funs(replace_values(.)))
+wcmatches <- wcmatches %>%
+  mutate_all(funs(replace_values(.)))
+```
+
+After cleaning the data, we should get this:
+```{r}
+unique(worldcups$host)
+unique(c(unique(wcmatches$home_team),unique(wcmatches$away_team)))
+```
+
+### Attendance by world cups
+Here we see the number of people attending the WC shows an increasing trend over the years.
+```{r echo=FALSE}
+ggplot(worldcups, aes(year,attendance)) +
+  geom_line() +
+  labs(title="Attendance at each WC",
+       x="Year",y="Attendance")
+```
+
+### Countries that won the most world cups
+Here are all the countries that have won at least one WC title:
+```{r echo=FALSE}
+# convert to number
+placemap <- data.frame(
+  placing=c("winner","second","third","fourth"),
+  rank=c(1,2,3,4)
+)
+# count number of times won by each country
+winner <- worldcups %>%
+  pivot_longer(cols=c(winner,second,third,fourth),
+               names_to="placing",
+               values_to="country") %>%
+  left_join(placemap,by="placing") %>%
+  group_by(country,rank) %>%
+  summarise(count=n()) %>%
+  pivot_wider(names_from=rank,values_from=count) %>%
+  replace(is.na(.),0) %>%
+  arrange(desc(`1`))
+#print(winner)
+
+wc_one <- winner %>%
+  filter(`1`>0) %>%
+  select(country,`1`) %>%
+  arrange(desc(`1`))
+ggplot(wc_one, aes(reorder(country,-`1`),`1`,fill=`1`)) +
+  geom_bar(stat="identity") +
+  scale_fill_gradient(low="blue",high="red") +
+  labs(title="Countries with at least one WC title",
+       x="Countries", y="Number of WC titles",fill="WC titles")
+```
+
+### Goals scored 
+We notice that although the number of goals scored in each WC displays an increasing trend, the number of goals scored per team or the number of goals scored per game actually shows a decreasing trend, due to the gradual introduction of more teams and hence matches played per WC.
+```{r echo=FALSE}
+ggplot(worldcups) +
+  geom_line(aes(year, goals_scored)) + 
+  labs(title="Number of goals scored at each WC",
+       x="Year",y="Number of goals scored")
+ggplot(worldcups) +
+  geom_line(aes(year, goals_scored/teams, color="line1")) +
+  geom_line(aes(year, goals_scored/games, color="line2")) +
+  scale_color_manual(values=c("line1"="blue","line2"="red"),
+                     labels=c("Goals scored per team","Goals scored per game")) +
+  labs(title="Number of goals per team/game at each WC",
+       x="Year",y="Number of goals scored",color="Legend")
+```   
+
+### Games won by Home/Draw/Away
+We notice that there does indeed seem to be a slight bias in favour of the home side winning. This might give rise to the postulated "home advantage" commonly discussed. 
+```{r echo=FALSE}
+ggplot(wcmatches, aes(x=outcome,y=after_stat(count/sum(count)),fill=outcome)) +
+  geom_bar() +
+  scale_fill_manual(values=c("red","green","blue")) +
+  labs(title="Overall wins/draws by home/away",
+       x="Outcome",y="Proportion")
+ggplot(wcmatches, aes(x=year,fill=factor(outcome))) +
+  geom_bar(position="fill") +
+  labs(title="Wins/Draws by home/away at each WC",
+       x="Year",y="Relative proportion within WC",fill="Legend")
+```
+
+<!--useless-->
+### Countries that win/lose the most and win % 
+```{r echo=FALSE} 
+# win draw loss for country
+wdl <- wcmatches %>%
+  select(home_team, away_team, outcome) %>%
+  pivot_longer(cols=c("home_team","away_team"), 
+               names_to="team_type", 
+               values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  group_by(team) %>%
+  summarize(win=sum(outcome.x=="H"), 
+            draw=sum(outcome.x=="D"), 
+            lose=sum(outcome.x=="A"))
+#print(wdl)
+wdlp <- wdl %>%
+  mutate(win_pct = win/(win+draw+lose),
+         draw_pct = draw/(win+draw+lose),
+         lose_pct = lose/(win+draw+lose)) %>%
+  arrange(desc(win+draw+lose), desc(win_pct))
+#print(wdlp)
+wdlm <- wdl %>% 
+  arrange(desc(win+draw+lose),desc(win)) %>%
+  head(10) %>%
+  pivot_longer(cols=c("win","draw","lose"),
+               names_to="result",values_to="count") 
+wdlp_plot<- ggplot(wdlm, aes(x=reorder(team,-count),y=count,fill=result)) +
+  geom_bar(stat="identity") + 
+  labs(title="Top 10 countries with most matches played, W/D/L distribution",
+       x="Country",y="Number of matches",fill="Result")
+#wdlp_plot
+```
+
+### Avg goal diff between playing as home side vs away side.
+We see that on average, playing at home appears to give half a goal advantage.
+```{r echo=FALSE}
+# find goal difference when playing as home or away
+goaldiff <- wcmatches %>%
+  pivot_longer(cols=c("home_team","away_team"),
+                      names_to="team_type",
+                      values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  mutate(goal_diff=ifelse(team_type=="home_team",home_score.x-away_score.x,away_score.x-home_score.x)) %>%
+  select(team,goal_diff,team_type) 
+# max of gd
+goaldiffmax <- goaldiff %>%
+  select(team, goal_diff) %>%
+  arrange(desc(goal_diff))
+# mean of gd
+goaldiffmean <- goaldiff %>%
+  select(team, goal_diff) %>%
+  group_by(team) %>%
+  summarize(avg_goaldiff=mean(goal_diff)) %>%
+  arrange(desc(avg_goaldiff))
+#print(goaldiff)
+#print(goaldiffmax)
+#print(goaldiffmean)
+
+# avg goal diff between home and away across all countries
+goaldiffha <- goaldiff %>%
+  group_by(team,team_type) %>%
+  summarize(avg_goal_diff=mean(goal_diff)) %>%
+  pivot_wider(names_from=team_type,
+              values_from=avg_goal_diff) %>%
+  replace(is.na(.),0)
+
+mean(goaldiffha$home_team-goaldiffha$away_team)
+```
+
+### Countries with most goals scored per game 
+We notice that goals scored per game overall is not a very good metric for predicting footballing strength. This may be as countries have performance swings that occur on shorter timeframes.
+```{r echo=FALSE}
+# goals scored by each nation in each match
+goals <- wcmatches %>%
+  select(home_team, away_team, home_score, away_score) %>%
+  pivot_longer(cols=c("home_score","away_score"), 
+               names_to = "result", 
+               values_to="goals") %>%
+  mutate(nation = ifelse(result=="home_score", home_team, away_team)) %>%
+  select(nation, goals)
+#print(goals)
+# most goals by each nation
+mostg <- goals %>%
+  group_by(nation) %>%
+  summarize(total_goals=sum(goals)) %>%
+  arrange(desc(total_goals))
+#print(mostg)
+
+mostgpg <- goals %>%
+  group_by(nation) %>%
+  summarize(avg_goals = mean(goals)) %>%
+  arrange(desc(avg_goals)) %>%
+  ungroup()
+#print(mostgpg)
+mostgpgm <- mostgpg %>%
+  head(10)
+print(mostgpgm)
+```
+
+<!--useless-->
+### Countries that win in aet 
+```{r echo=FALSE}
+aet <- wcmatches %>%
+  filter(str_detect(win_conditions,"AET")) %>%
+  select(home_team, away_team, outcome) %>%
+  pivot_longer(cols=c("home_team","away_team"), 
+               names_to="team_type", 
+               values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  group_by(team) %>%
+  summarize(win=sum(outcome.x=="H"), 
+            #draw=sum(outcome.x=="D"), 
+            lose=sum(outcome.x=="A")) %>%
+  filter(!(win==0 & lose==0))
+#print(aet)
+```
+
+<!--useless-->
+### Countries that win on penalties 
+```{r echo=FALSE}
+pens <- wcmatches %>%
+  filter(str_detect(win_conditions,"penalties")) %>%
+  select(home_team, away_team, outcome) %>%
+  pivot_longer(cols=c("home_team","away_team"), 
+               names_to="team_type", 
+               values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  group_by(team) %>%
+  summarize(win=sum(outcome.x=="H"), 
+            #draw=sum(outcome.x=="D"), 
+            lose=sum(outcome.x=="A")) %>%
+  filter(!(win==0 & lose==0))
+#print(pens)
+```
+
+### Consistency of country (successive matches won/undefeated)
+The longest winning streak is 11 matches, and longest undefeated (win or draw) is 13 matches.
+```{r echo=FALSE}
+# arrange by date (it already is) then mutate new column for a win or loss for each country
+windate <- wcmatches %>%
+  select(home_team, away_team, winning_team, losing_team, date) %>%
+  pivot_longer(cols=c("home_team","away_team"),
+               names_to="team_type",
+               values_to="team") %>%
+  left_join(wcmatches,by=c("team_type"="home_team")) %>%
+  mutate(date.x=as.Date(date.x),
+         win=case_when(
+           team==winning_team.x ~ 1,
+           .default=0),
+         undefeated=case_when(
+           team==winning_team.x ~ 1,
+           team==losing_team.x ~ 0,
+           .default=1)) %>% 
+  select(where(function(x) any(!is.na(x)))) 
+#print(windate)
+# calculate winstreak using rle
+winstreak <- windate %>%
+  select(country=team,date=date.x,win,undefeated) %>%
+  arrange(date) %>%
+  group_by(country) %>%
+  mutate(consec_win = sequence(rle(win)$lengths),
+         consec_undefeated = sequence(rle(undefeated)$lengths)) %>%
+  mutate(consec_win = ifelse(win==0,0,consec_win),
+         consec_undefeated = ifelse(undefeated==0,0,consec_undefeated)) %>%
+  ungroup()
+#print(winstreak)
+print(winstreak %>% select(-consec_undefeated) %>% filter(consec_win==max(consec_win)))
+print(winstreak %>% select(-consec_win) %>% filter(consec_undefeated==max(consec_undefeated)))
+```
+
+<!--Number of times a country appear in each bracket (group, quarter, semi, finals)-->
+### Number of unique countries to make it to each stage of the WC
+Only 14 different countries have made it to the finals, and of these only 8 different countries have won.
+```{r echo=FALSE}
+# mutate stage into more concise name
+stages <- wcmatches %>%
+  select(stage,home_team,away_team) %>%
+  pivot_longer(cols=c("home_team","away_team"),
+               names_to="team_type",
+               values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  mutate(stage=case_when(
+    grepl("Group", stage.x) ~ "G",
+    stage.x=="Round of 16" ~ "RO16",
+    stage.x=="Quarterfinals" ~ "QF",
+    stage.x=="Semifinals" ~ "SF",
+    stage.x=="Third place" ~ "TP",
+    grepl("Final", stage.x) ~ "F",
+    TRUE ~ stage.x
+  )) %>%
+  select(stage, team_type, team) 
+#print(stages)
+# count unique no. of countries that reached each stage
+stagecount <- stages %>%
+  select(country=team, stage) %>%
+  group_by(country, stage) %>%
+  summarize(count=n()) %>%
+  arrange(match(stage,c("G","RO16","QF","SF","TP","F"))) %>%
+  pivot_wider(names_from=stage,
+              values_from=count) %>%
+  left_join(winner, by="country") %>%
+  select(-c(9,10,11), W=`1`) %>%
+  replace(is.na(.),0) %>%
+  arrange(across(all_of(c("W","F","TP","SF","QF","RO16","G")), desc)) %>%
+  ungroup()
+#print(stagecount)
+stageunique <- stagecount %>%
+  select(-country) %>%
+  summarize(across(everything(),~sum(.x != 0)))
+print(stageunique)
+```
+
+## Question 
+### Can we estimate predictors for the winning team of a WC match and the scoreline?
+### (Figures from here on ARE meant to be graded)
+
+First we want to generate the train and test split. Suppose we leave the most recent WC (2018) as the test, and take the rest to train. 
+```{r echo=FALSE}
+# train <- wcmatches %>%
+#   filter(year!=2018)
+# test <- wcmatches %>%
+#   filter(year==2018)
+# worldcupstrain <- worldcups %>%
+#   filter(year!=2018)
+# worldcupstest <- worldcups %>%
+#   filter(year==2018)
+train_split <- dim(wcmatches %>%
+                     filter(year!=2018))[1]
+test_split <- dim(wcmatches %>%
+                    filter(year==2018))[1]
+```
+Number of observations in ```train```:
+```{r echo=FALSE}
+train_split
+```
+Number of observations in ```test```:
+```{r echo=FALSE}
+test_split
+```
+
+Now we take an extension from some of our earlier exploratory analyses, and attempt to generate "ELO" ratings of the countries. <!--We can first set some constants and utility functions-->
+```{r echo=FALSE}
+K = 64 # we can consider a stepped K, e.g. 64 for G, RO16, 32 for QF, SF, 16 for TP, F
+base = 400
+#account for home vs away. Assign 1 to win, 0.5 to draw, 0 to loss. +0.05 if winning away, -0.05 if losing at home 
+#(+0.01 for every goal scored, -0.01 for every goal conceded) > not implemented
+goals=0.01 #not implemented
+bias=0.05
+win=1
+draw=0.5
+lose=0
+EV <- function(Ra, Rb) { #expected score given rating of A and B
+  Qa = 10^(Ra/base)
+  Qb = 10^(Rb/base)
+  Ea = Qa/(Qa+Qb)
+  Eb = Qb/(Qa+Qb)
+  return(c(Ea,Eb))
+}
+
+update <- function(R, V, E) { #original rating, actual value, expected value
+  return(R + K*(V-E))
+}
+```
+
+As ELO must be fetched, calculated, and update dynamically, it is difficult to vectorize this and we opt for a less computationally efficient iterative method. Here, we show the first few entries of the ELO dataframe (after each match) as well as the ELO after the conclusion of the 2018 edition of the WC.
+```{r echo=FALSE}
+# current ELO
+curr_elo <- data.frame(
+  country=unique(c(unique(wcmatches$home_team),unique(wcmatches$away_team))),
+  elo=1000
+)
+# include ELO
+elo <- wcmatches %>%
+  select(home_team, away_team, winning_team, losing_team, date) %>%
+  pivot_longer(cols=c("home_team","away_team"),
+               names_to="team_type",
+               values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  select(date=date.x,country=team,team_type,winner=winning_team.x,loser=losing_team.x) %>%
+  mutate(elo=1000,
+         score=case_when(
+           country==winner ~ win,
+           is.na(winner) ~ draw,
+           .default = lose
+         ) + case_when(
+           country==winner & team_type=="away_team" ~ bias,
+           is.na(winner) ~ 0,
+           country!=winner & team_type=="home_team" ~ -bias,
+           .default = 0
+         ))
+
+# iterate through every 2 rows to update ELO
+for(i in 1:(nrow(elo)/2)){
+  idx1 <- 2*i - 1
+  idx2 <- 2*i
+  init1 <- curr_elo[curr_elo$country==elo$country[idx1],2]
+  init2 <- curr_elo[curr_elo$country==elo$country[idx2],2]
+  score1 <- elo$score[idx1]
+  score2 <- elo$score[idx2]
+  expected <- EV(init1,init2)
+  ev1 <- expected[1]
+  ev2 <- expected[2]
+  update1 <- update(init1, score1, ev1)
+  update2 <- update(init2, score2, ev2)
+  elo$elo[idx1] <- update1
+  elo$elo[idx2] <- update2
+  curr_elo[curr_elo$country==elo$country[idx1],2] <- update1
+  curr_elo[curr_elo$country==elo$country[idx2],2] <- update2
+}
+#print(elo)
+#print(curr_elo)
+head(elo)
+head(curr_elo)
+```
+
+Let's take a look at the data now.
+
+Here is the current ELO standings of all countries, plotted against number of matches (I included a map of the countries as well as it looked nice, not for grading purposes). We use a scatter plot as the data involves plotting discrete values (one point for every country).
+
+From this, we can see that generally, countries that play more matches have a higher ELO. This means that our ELO system is a good representation of the strength of a country (as winning more matches generally implies further progression in the world cup, and also beating stronger teams).
+```{r echo=FALSE}
+# mutate to calculate total matches, dist for color of point later
+elo_matches <- curr_elo %>%
+  left_join(wdl,by=c("country"="team")) %>%
+  mutate(matches=win+draw+lose,
+         dist=sqrt(matches^2+elo^2)) 
+#head(elo_matches)
+eloplot <- ggplot(elo_matches,aes(matches,elo,color=dist,key=country)) +
+  geom_point() +
+  scale_color_gradient(low="blue",high="red") +
+  labs(title="Scatter of matches played against ELO",
+       x="ELO",y="Matches") +
+  theme(legend.position="none")
+eloplot <- ggplotly(eloplot)
+#<!--And here is the ELO of all countries over time:-->
+#<!--In a map:-->
+world <- map_data("world")
+#head(world)
+elofixed <- elo %>%
+  mutate(country=ifelse(country=="United States","USA",country),
+         country=ifelse(country=="China PR","China",country),
+         year=year(date)) 
+elomap <- elofixed %>%
+  right_join(world, by=c("country"="region"), multiple="all")
+#unique(world$region)
+# ggplot(elo,aes(date,elo,group=country,color=country)) +
+#   geom_line() +
+#   geom_point() +
+#   labs(title="Country ELO over time",
+#        x="Date",y="ELO") +
+#   ylim(c(0,1500)) +
+#   theme(legend.position="none")
+elomapplot <- ggplot(subset(elomap,year=2018),aes(long,lat,group=group)) +
+  geom_polygon(aes(fill=elo),color="black") +
+  scale_fill_gradient2(low="red",mid="white",high="blue",midpoint=1000,name="elo") #+
+  #transition_states(year)
+#animate(elomapplot,fps=20,duration=30,end_pause=5,renderer=gifski_renderer("elomap.gif"))
+#anim_save("elomap.gif",elomapplot)
+elomapplot <- ggplotly(elomapplot)
+#not efficient
+#ggplotly(plots) %>%
+#  animation_slider(currentvalue=list(font=list(colour="orange")),redraw=TRUE)
+
+subplot(eloplot,elomapplot,margin=0.03) %>%
+  layout(title="Scatter of ELO against matches played",
+         xaxis=list(title="Matches Played"),yaxis=list(title="ELO"))
+```
+<!--![](elomap.gif)-->
+
+So, for each match, let us see if we are able to predict the winner and scoreline based on several factors (we ignore penalties for simplicity):
+
+ELO of the two teams, home vs away side, average goals scored in the last N matches (set N=10), average goals conceded in last N matches, day of week, stage. For goals scored/conceded, we consider the cases limited to home-only matches, away-only matches, and all matches. <!-- consider head-to-head record, performance in home vs away (goal diff), poisson dist/regression-->
+
+We will store the training predictors in ```train_x```, training outputs in ```train_y```, test predictors in ```test_x```, test outputs in ```test_y```
+
+<!--First we recorrect the elo ratings to show elo before the match, not after-->
+```{r echo=FALSE}
+# current ELO
+curr_elo <- data.frame(
+  country=unique(c(unique(wcmatches$home_team),unique(wcmatches$away_team))),
+  elo=1000
+)
+# include ELO 
+mod_elo <- wcmatches %>%
+  select(home_team, away_team, winning_team, losing_team, date) %>%
+  pivot_longer(cols=c("home_team","away_team"),
+               names_to="team_type",
+               values_to="team") %>%
+  left_join(wcmatches, by=c("team_type"="home_team")) %>%
+  select(date=date.x,country=team,team_type,winner=winning_team.x,loser=losing_team.x) %>%
+  mutate(elo=1000,
+         score=case_when(
+           country==winner ~ win,
+           is.na(winner) ~ draw,
+           .default = lose
+         ) + case_when(
+           country==winner & team_type=="away_team" ~ bias,
+           is.na(winner) ~ 0,
+           country!=winner & team_type=="home_team" ~ -bias,
+           .default = 0
+         ))
+
+# iterate through every 2 rows, update ELO
+for(i in 1:(nrow(mod_elo)/2)){
+  idx1 <- 2*i - 1
+  idx2 <- 2*i
+  init1 <- curr_elo[curr_elo$country==mod_elo$country[idx1],2]
+  init2 <- curr_elo[curr_elo$country==mod_elo$country[idx2],2]
+  score1 <- mod_elo$score[idx1]
+  score2 <- mod_elo$score[idx2]
+  expected <- EV(init1,init2)
+  ev1 <- expected[1]
+  ev2 <- expected[2]
+  update1 <- update(init1, score1, ev1)
+  update2 <- update(init2, score2, ev2)
+  mod_elo$elo[idx1] <- init1
+  mod_elo$elo[idx2] <- init2
+  curr_elo[curr_elo$country==mod_elo$country[idx1],2] <- update1
+  curr_elo[curr_elo$country==mod_elo$country[idx2],2] <- update2
+}
+
+# function to calculate moving average
+window = 10 
+SMA <- function(x, window_size) {
+  sapply(seq_along(x), function(i) mean(x[max(1,i-window_size+1):i],na.rm=TRUE))
+}
+
+# adding predictors
+mat <- mod_elo %>%
+  select(date,country,team_type,elo) %>%
+  mutate(grp=rep(1:(nrow(mod_elo)/2),each=2)) %>%
+  pivot_wider(names_from=team_type,values_from=c(country,elo)) %>%
+  cbind(wcmatches[c("home_score","away_score","dayofweek","stage")]) %>%
+  mutate(stage=case_when(
+    grepl("Group", stage) ~ "G",
+    stage=="Round of 16" ~ "RO16",
+    stage=="Quarterfinals" ~ "QF",
+    stage=="Semifinals" ~ "SF",
+    stage=="Third place" ~ "TP",
+    grepl("Final", stage) ~ "F",
+    TRUE ~ stage
+  )) %>%
+  select(-grp,home=country_home_team,away=country_away_team,day=dayofweek,
+         home_elo=elo_home_team,away_elo=elo_away_team, stage) 
+
+# calculating moving average of goals
+mat <- mat %>%
+  group_by(home) %>%
+  mutate(home_only_gf = SMA(home_score,window),
+         home_only_ga = SMA(away_score,window)) %>%
+  ungroup() %>%
+  group_by(away) %>%
+  mutate(away_only_gf = SMA(away_score,window),
+         away_only_ga = SMA(home_score,window)) %>%
+  ungroup()
+
+# additional predictors
+mat2 <- mat %>%
+  pivot_longer(cols=c("home","away"),
+               names_to="side",
+               values_to="country") %>%
+  group_by(country) %>%
+  mutate(temp_gf = ifelse(side=="home",home_score,away_score),
+         temp_ga = ifelse(side=="home",away_score,home_score)) %>%
+  mutate(gf = SMA(temp_gf,window),
+         ga = SMA(temp_ga,window)) %>%
+  select(-temp_gf,-temp_ga) %>%
+  ungroup() %>%
+  mutate(grp = rep(1:nrow(mat),each=2)) %>%
+  pivot_wider(id_cols=setdiff(names(.), c("side","country","gf","ga")),
+              names_from=side,
+              values_from=c("country","gf","ga"),
+              names_glue="{side}_{.value}") %>%
+  select(-grp) %>%
+  mutate(day=factor(day,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")),
+         stage=factor(stage,levels=c("G","RO16","QF","SF","TP","F")))
+#print(mat2)
+
+#We can take a look at the train and test data now:
+
+x_s <- mat2 %>%
+  select(home_elo,away_elo,day,home_only_gf,home_only_ga,away_only_gf,away_only_ga,home_gf,home_ga,away_gf,away_ga,stage) 
+y_s <- mat2 %>%
+  select(home_score,away_score)
+#head(x_s)
+#head(y_s)
+
+train_x <- head(model.matrix(~.,data=x_s),train_split)
+test_x <- tail(model.matrix(~.,data=x_s),test_split)
+train_y <- head(model.matrix(~.-1,data=y_s),train_split)
+test_y <- tail(model.matrix(~.-1,data=y_s),test_split)
+#head(train_x)
+#head(train_y)
+#head(test_x)
+#head(test_y)
+```
+
+Now, to fit the linear regression model ```Y = XB``` which is an overdetermined system, we may use 
+```{r}
+B <- qr.solve(train_x,train_y)
+```
+
+Predictions!
+```{r echo=FALSE}
+# predict just matrix multiplication
+pred_y <- test_x %*% B
+# res <- cbind(test_y,pred_y) # duplicate col names
+res <- data.frame(
+  home_score_real = test_y[,1],
+  away_score_real = test_y[,2],
+  home_score_pred = pred_y[,1],
+  away_score_pred = pred_y[,2]
+)
+#head(res)
+res <- res %>%
+  mutate(home_score_pred_round = round(home_score_pred),
+         away_score_pred_round = round(away_score_pred))
+head(res %>% select(-home_score_pred_round,-away_score_pred_round))
+```
+
+To evaluate the performance of this model, we have 2 metrics.
+
+Firstly, the actual prediction i.e. winner/loser/draw.
+Secondly, the goal scoreline.
+
+We use a density plot to evaluate the predicted scoreline, based on goal difference, goals scored by home team, and goals scored by away team. A density plot makes sense here as our prediction treats goals as a continuous variable due to the nature of linear regression. Furthermore, a discrete type chart such as a bar chart or histogram would not represent the data well. We notice our model (blue) tends to underestimate actual (red) goal difference, and it seems to predict goals scored by home and away in a narrower range than the actual distribution. This means further transformation of the predictor variables may be necessary, or perhaps refinement of the ELO system we use.
+
+We use a heatmap to evaluate the actual predictions. We group up the data by ELO ranges, and in each ELO range matchup we calculate the "score" for the predictions of those matchups (red for correct, blue for wrong). A heatmap is appropriate here as it allows us to compare the ELO ranges of the 2 sides (home and away) in a manner similar to a correlation matrix. This allows for easy comparison and further analysis of the shortcomings of our model, as we are under the assumption that ELO will be a major predictor of the match. We also notice that we lack data in some ELO bracket matchups, due to the relative lack of data (small dataset). We also seem to overstate the impact of home advantage, as many of the wrong predictions seem to occur for away sides at any ELO vs home sides at low ELO. 
+
+The overall accuracy of our predictions are around 47%, with draws being predicted correctly 85% of the time and non-draws 43% of the time. This therefore likely indicates that the model is predicting draws far too often, as a result of the reduced predicted goal difference between the teams (explained above). This might be mitigated by including a third output variable for the model to learn to predict if a game is a draw or non-draw, rather than just relying on goal difference. However, this is still a decent performance given the limitations of our dataset. 
+```{r echo=FALSE}
+# generate prediction outcome (right/wrong)
+res <- res %>%
+  mutate(pred_mod=case_when(
+    home_score_real>away_score_real & home_score_pred_round>away_score_pred_round ~ 1,
+    home_score_real==away_score_real & home_score_pred_round==away_score_pred_round ~ 1,
+    home_score_real<away_score_real & home_score_pred_round<away_score_pred_round ~ 1,
+    .default = 0),
+    pred=case_when(
+    home_score_real>away_score_real & home_score_pred_round>away_score_pred_round ~ 1,
+    home_score_real==away_score_real & home_score_pred_round==away_score_pred_round ~ 1,
+    home_score_real<away_score_real & home_score_pred_round<away_score_pred_round ~ 1,
+    .default = -1),
+    actual_diff=home_score_real-away_score_real,
+    pred_diff=home_score_pred-away_score_pred,
+    is_draw = case_when(
+      home_score_real==away_score_real ~ 1,
+      .default = 0
+    )
+  )
+#head(res)
+# indiv df for each density plot
+res1 <- res %>%
+  select(actual_diff,pred_diff) %>%
+  pivot_longer(cols=c("actual_diff","pred_diff"),
+               names_to = "AP",values_to="score")
+res2 <- res %>%
+  select(home_score_real,home_score_pred) %>%
+  pivot_longer(cols=c("home_score_real","home_score_pred"),
+               names_to = "AP",values_to="score")
+res3 <- res %>%
+  select(away_score_real,away_score_pred) %>%
+  pivot_longer(cols=c("away_score_real","away_score_pred"),
+               names_to = "AP",values_to="score")
+# plot density plot
+kde1 <- ggplot(res1) +
+  geom_density(aes(x=score,fill=AP),alpha=0.5) +
+  scale_fill_manual(values=c("red","blue")) #+
+  #labs(title="Density curve of predicted versus actual scoreline difference (Home - Away)",
+       #x="Goals",y="Density")
+kde2 <- ggplot(res2) +
+  geom_density(aes(x=score,fill=AP),alpha=0.5) +
+  scale_fill_manual(values=c("blue","red")) #+
+  #labs(title="Density curve of predicted versus actual goals scored (Home)",
+       #x="Goals",y="Density")
+kde3 <- ggplot(res3) +
+  geom_density(aes(x=score,fill=AP),alpha=0.5) +
+  scale_fill_manual(values=c("blue","red")) #+
+  #labs(title="Density curve of predicted versus actual goals scored (Away)",
+       #x="Goals",y="Density")
+kde1<-ggplotly(kde1)
+kde2<-ggplotly(kde2)
+kdd3<-ggplotly(kde3)
+subplot(kde1,kde2,kde3,nrows=3,margin=0.05) %>%
+  layout(title="Density curves of predicted versus actual",
+         margin = list(l = 50, r = 50, b = 50, t = 50, pad = 4),
+         xaxis=list(title=""),xaxis2=list(title=""),
+         xaxis3=list(title="Goals"),
+         yaxis=list(title="Density"),yaxis2=list(title="Density"),yaxis3=list(title="Density"))
+
+res_elo <- res %>%
+  cbind(test_x[,2:3])
+#head(res_elo)
+#elo range is 800-1400, split into groups of 100 elo (maybe 50?)
+min_elo=800
+max_elo=1400
+elo_window=100
+elo_bucket <- seq(min_elo,max_elo,by=elo_window)
+get_elo_bucket <- function(x) {
+  for(i in 1:length(elo_bucket)) {
+    if(elo_bucket[i] < x) {
+      next
+    }
+    return(i-1)
+  }
+  return(length(elo_bucket)-1)
+}
+# get elo of test outputs
+res_elo_bucket <- res_elo %>%
+  rowwise() %>%
+  mutate(home_grp = unlist(c(across(home_elo,get_elo_bucket))),
+         away_grp = unlist(c(across(away_elo,get_elo_bucket)))) %>%
+  mutate(home_grp = min_elo+((home_grp-1)*elo_window),
+         away_grp = min_elo+((away_grp-1)*elo_window)) %>%
+  select(pred,pred_mod,home_grp,away_grp,is_draw)
+#head(res_elo_bucket)
+all_grp <- expand.grid(home_grp=head(elo_bucket,-1),
+                       away_grp=head(elo_bucket,-1))
+res_elo_bucket2 <- res_elo_bucket %>%
+  group_by(home_grp,away_grp) %>%
+  summarize(mean_pred=mean(pred),
+            mean_pred_mod=mean(pred_mod)) 
+res_elo_bucket2 <- all_grp %>%
+  left_join(res_elo_bucket2,by=c("home_grp","away_grp"))
+#print(res_elo_bucket)
+# plot heat map
+heatmap <- ggplot(res_elo_bucket2) +
+  geom_rect(aes(xmin=home_grp,xmax=home_grp+elo_window,ymin=away_grp,ymax=away_grp+elo_window,
+                fill=mean_pred),color="black") +
+  scale_fill_gradient2(low="blue",mid="white",high="red",
+                       midpoint=mean(res_elo_bucket2$mean_pred,na.rm=TRUE),na.value="grey") +
+  labs(title="Heatmap of ELO brackets of away vs home, coloured by accuracy of prediction",
+       x="Home ELO",y="Away ELO") +
+  theme_minimal()
+ggplotly(heatmap)
+
+print(paste("Overall accuracy of prediction:", mean(res_elo_bucket2$mean_pred_mod, na.rm=TRUE)))
+print(paste("Overall accuracy of prediction, excluding draws:",
+            mean(res_elo_bucket[res_elo_bucket$is_draw==0,]$pred_mod, na.rm=TRUE)))
+print(paste("Overall accuracy of prediction, draws only:",
+            mean(res_elo_bucket[res_elo_bucket$is_draw==1,]$pred_mod, na.rm=TRUE)))
+```
+
+## Discussion
+In this project, we aim to investigate what are plausible predictors for the outcome of a FIFA WC match. 
+Hence, we developed an ELO system based somewhat on the actual system used for FIFA rankings. Following that, we combined this with other potential predictors to conduct linear regression on the data, such as the commonly heard "home advantage".
+
+Based on the results, we deduce that our ELO ratings do offer some sort of semblance to actual FIFA ratings, and also corroborate well with the expected WC title winners (i.e. we would expect countries with higher ELO ratings to have won at least one WC title, which is what is generally observed).
+
+From the linear regression results however, we note that there is still some quite substantial error, likely due to a multitude of factors. 
+
+Firstly, scarcity of data. As this dataset only includes the FIFA WC matches, which occur every 4 years or so, that leaves a long timeframe, between which ELO ratings could fluctuate more due to other football competitions such as the Euros, AFC, friendlies, etc. This is also a key reason why we opted for linear regression, as due to the lack of data we might be unable to fit more complex models.
+
+Secondly, shortage of potential predictors. It should be noted that while our ELO system may be representative of the strength of a team during a general short term timeframe, it does not account for more minute factors such as squad availability, team formation, and even manager. A team missing their star player, for instance, might underperform, which we are unable to investigate here.
+
+Thirdly, this ignores the effects of more "random" events such as free kicks, corners, and penalties. In particular, our model is not able to take into account an elimination match that ends in a draw after extra time going to penalties, in which case teams may perform very differently due to different expected penalty probabilities. This is a significant oversight as the number of such matches going to penalties is non-negligible.
+
+## Conclusion
+In this project, we looked at the FIFA World Cup data, generating a plausible ELO system for the countries, and using linear regression to predict the outcome of matches. Overall, our model fared decently, and we were able to estimate optimal values for the predictors given the data we had. We also elaborated further on some limitations of our model and what could be improved in future. 
+
+## References
+[Data taken from here](https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-11-29)
+
+[FIFA ranking](https://www.fifa.com/fifa-world-ranking/procedure-men)
+
+[ELO Rating](https://stanislav-stankovic.medium.com/elo-rating-system-6196cc59941e)
